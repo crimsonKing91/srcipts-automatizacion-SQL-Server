@@ -1,0 +1,106 @@
+-- SCRIPT PARA REALIZAR BACKS EN 204.100
+EXEC sp_configure 'show advanced options', 1;
+RECONFIGURE WITH OVERRIDE;
+GO
+EXEC sp_configure 'xp_cmdshell', 1;
+RECONFIGURE WITH OVERRIDE;
+GO
+
+
+DECLARE @dbname VARCHAR(100)
+DECLARE @TamGb DECIMAL(10,4)
+DECLARE @TamMb DECIMAL(10,2)
+DECLARE @NombreRAR VARCHAR(8000)
+DECLARE @NombreCompleto VARCHAR(8000)
+DECLARE @Ruta VARCHAR(8000)
+DECLARE @Orden VARCHAR(8000)
+DECLARE @BackupName VARCHAR(8000)
+
+-- Ruta base para los backups
+SET @Ruta = '\\10.12.136.242\mnt\nfsshare\Backup-Server-204.100\ULTIMO_GENERAL\' + REPLACE(RTRIM(CONVERT(Varchar(max), GETDATE(),103)), '/', '') + '\'
+-- SET @Ruta = 'C:\BackUp\'
+
+SET @Orden = 'IF NOT EXIST "' + @Ruta + '" MKDIR "' + @Ruta + '"'
+EXEC master.dbo.xp_cmdshell @Orden;
+
+-- Cursor para recorrer las bases de datos
+DECLARE db_cursor CURSOR LOCAL FAST_FORWARD FOR
+
+--SELECT name -- EXCLUYE BASES DE DATOS OFFLINE (517)
+--FROM master.sys.databases
+--WHERE name NOT IN ('master', 'model', 'msdb', 'tempdb')
+--AND state = 0 -- solo bases de datos en línea
+--AND name LIKE '%DAEYEONG%' 
+--ORDER BY name
+
+
+SELECT name 
+FROM master.sys.databases d
+WHERE state = 0 
+AND name NOT IN ('master', 'model', 'msdb', 'tempdb')
+AND EXISTS (
+    SELECT 1 FROM (VALUES ('%DAEYEONG%'), ('%DRENC%'), ('%ESPARTEC%')) AS Filtros(Patron)
+    WHERE d.name LIKE Filtros.Patron
+)
+ORDER BY name
+
+--SELECT -- BASES DE DATOS QUE ESTAN OFFLINE (14)
+--    DB_NAME(mf.database_id) AS DatabaseName,
+--    db.state_desc AS DatabaseState,
+--    COUNT(*) AS FileCount
+--FROM sys.master_files mf
+--LEFT JOIN sys.databases db ON mf.database_id = db.database_id
+--WHERE mf.database_id > 4
+--AND (db.database_id IS NULL OR db.state != 0)
+--GROUP BY mf.database_id, db.state_desc
+--ORDER BY DatabaseName;
+
+--SELECT -- NO EXCLUYE BASES DE DATOS OFFLINE (531)
+--    DB_NAME(database_id) AS [Base de Datos],
+--    CAST(SUM(size * 8.0 / 1024) AS DECIMAL(10,2)) AS [Tamaño Total (MB)],
+--    CAST(SUM(size * 8.0 / 1024 / 1024) AS DECIMAL(10,4)) AS [Tamaño Total (GB)]
+--FROM sys.master_files
+--WHERE database_id > 4 -- Excluye bases de sistema
+--GROUP BY database_id
+----HAVING CAST(SUM(size * 8.0 / 1024 / 1024) AS DECIMAL(10,2)) < 0.0005
+--ORDER BY [Tamaño Total (MB)] DESC;
+
+
+
+OPEN db_cursor
+FETCH NEXT FROM db_cursor INTO @dbname -- , @TamGb, @TamMb
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    -- Configurar nombres de archivo con fecha
+    -- SET @NombreCompleto = @Ruta + @dbname + '_' + REPLACE(CONVERT(VARCHAR(10), GETDATE(), 103), '/', '') + '.bak'
+    -- SET @NombreRAR = @Ruta + @dbname + '_' + REPLACE(CONVERT(VARCHAR(10), GETDATE(), 103), '/', '') + '.rar'
+
+	SET @NombreCompleto= @Ruta + @dbname + '_' + REPLACE(RTRIM(CONVERT(Varchar(max), GETDATE(),103)), '/', '') + '.bak'
+	SET @NombreRAR= @Ruta + @dbname + '_' + REPLACE(RTRIM(CONVERT(Varchar(max), GETDATE(),103)), '/', '') + '.rar'
+
+	SET @BackupName = 'Admin - ' + @dbname
+
+    -- Realizar backup de la base de datos
+    DECLARE @BackupCommand VARCHAR(8000)
+    SET @BackupCommand = 'BACKUP DATABASE [' + @dbname + '] TO DISK = ''' + @NombreCompleto + ''' WITH INIT, NOUNLOAD, NAME = N''' + @BackupName + ''', SKIP, STATS = 10, FORMAT'
+    EXEC(@BackupCommand)
+
+    -- Comprimir el backup y eliminar el original (solución al problema de espacios)
+    SET @Orden = '"C:\Program Files\WinRAR\rar.exe" a -m5 -ep1 -df -idc  ' + @NombreRAR + ' ' + @NombreCompleto
+    EXEC master.dbo.xp_cmdshell @Orden
+    -- SET @Orden ='"C:\Program Files\WinRAR\rar.exe" a -m5 -df ' + @NombreRAR + ' ' + @NombreCompleto -- ORIG
+
+    FETCH NEXT FROM db_cursor INTO @dbname -- , @TamGb, @TamMb
+END
+
+CLOSE db_cursor
+DEALLOCATE db_cursor
+GO
+
+-- EXEC sp_configure 'show advanced options', 1;
+-- RECONFIGURE WITH OVERRIDE;
+-- GO
+-- EXEC sp_configure 'xp_cmdshell', 0;
+-- RECONFIGURE WITH OVERRIDE;
+-- GO

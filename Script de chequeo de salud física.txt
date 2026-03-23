@@ -1,0 +1,19 @@
+# Script de chequeo de salud física
+$servidorDestino = "DAN_SAC\ENG_2014_SQL"
+$conn = Connect-DbaInstance -SqlInstance $servidorDestino -TrustServerCertificate
+
+# Obtiene todas las bases de usuario (excluye master, model, etc)
+$bases = Get-DbaDatabase -SqlInstance $conn -ExcludeSystem
+
+foreach ($db in $bases) {
+    Write-Host "Verificando integridad física de: $($db.Name)..." -NoNewline
+    
+    # Invoke-DbaDbCheckDb corre el comando DBCC CHECKDB
+    $resultado = Invoke-DbaDbCheckDb -SqlInstance $conn -Database $db.Name -ValuesOnly
+    
+    if ($resultado -eq "0") {
+        Write-Host " [OK] - Sin corrupción." -ForegroundColor Green
+    } else {
+        Write-Host " [PELIGRO] - Errores encontrados." -ForegroundColor Red
+    }
+}

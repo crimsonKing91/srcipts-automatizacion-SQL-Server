@@ -1,0 +1,92 @@
+USE [master];
+GO
+
+-- 1. CREACIÓN DEL LOGIN (Nivel Servidor)
+IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = 'drenc')
+BEGIN
+    CREATE LOGIN [drenc] 
+    WITH PASSWORD = '(3?R7sjYBp6A', 
+    DEFAULT_DATABASE = [master], 
+    CHECK_EXPIRATION = OFF, -- NO EXPIRA
+    CHECK_POLICY = ON;
+    PRINT 'Login [drenc] creado exitosamente.';
+END
+ELSE
+BEGIN
+    PRINT 'El login [drenc] ya existe.';
+END
+GO
+
+-- 2. ASIGNACIÓN DE PERMISOS MASIVOS (Nivel Bases de Datos)
+DECLARE @Usuario NVARCHAR(128) = 'drenc';
+DECLARE @DBName NVARCHAR(128);
+DECLARE @SQL NVARCHAR(MAX);
+
+-- Filtramos específicamente por las bases que contienen OLSA
+DECLARE db_cursor CURSOR FOR 
+SELECT name 
+FROM sys.databases 
+WHERE name NOT IN ('master', 'model', 'msdb', 'tempdb') 
+  AND state = 0 
+  AND name LIKE '%drenc%' -- <--- Filtro específico para este grupo
+
+OPEN db_cursor;
+FETCH NEXT FROM db_cursor INTO @DBName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @SQL = 'USE [' + @DBName + '];
+                IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = ''' + @Usuario + ''')
+                BEGIN
+                    CREATE USER [' + @Usuario + '] FOR LOGIN [' + @Usuario + '] WITH DEFAULT_SCHEMA = [dbo];
+                END
+                ELSE
+                BEGIN
+                    ALTER USER [' + @Usuario + '] WITH DEFAULT_SCHEMA = [dbo];
+                END
+                ALTER ROLE db_owner ADD MEMBER [' + @Usuario + '];';
+    
+    PRINT 'Permisos de propietario asignados en: ' + @DBName;
+    EXEC sp_executesql @SQL;
+
+    FETCH NEXT FROM db_cursor INTO @DBName;
+END
+
+CLOSE db_cursor;
+DEALLOCATE db_cursor;
+PRINT 'Proceso completado para el usuario.';
+
+
+
+
+
+--DECLARE @Usuario NVARCHAR(128) = 'mapro';
+--DECLARE @DynamicSQL NVARCHAR(MAX) = '';
+
+---- Construimos una consulta unificada para todas las bases de datos
+--SELECT @DynamicSQL = @DynamicSQL + 
+--    'SELECT 
+--        ''' + name + ''' AS [Base de Datos],
+--        pr.name AS [Usuario],
+--        pr.default_schema_name AS [Esquema por Defecto],
+--        ISNULL(STUFF((SELECT '', '' + role.name 
+--                      FROM [' + name + '].sys.database_role_members rm
+--                      JOIN [' + name + '].sys.database_principals role ON rm.role_principal_id = role.principal_id
+--                      WHERE rm.member_principal_id = pr.principal_id
+--                      FOR XML PATH('''')), 1, 2, ''''), ''SIN ROLES'') AS [Roles Asignados]
+--    FROM [' + name + '].sys.database_principals pr
+--    WHERE pr.name = ''' + @Usuario + '''
+--    UNION ALL '
+--FROM sys.databases 
+--WHERE state = 0 
+--  AND name NOT IN ('master', 'model', 'msdb', 'tempdb')
+--  AND name LIKE '%MAPRO%'; -- Filtro para tus bases de datos
+
+---- Quitamos el último 'UNION ALL ' y ejecutamos
+--IF LEN(@DynamicSQL) > 0
+--BEGIN
+--    SET @DynamicSQL = LEFT(@DynamicSQL, LEN(@DynamicSQL) - 10);
+--    EXEC sp_executesql @DynamicSQL;
+--END
+--ELSE
+--    PRINT 'No se encontró el usuario en ninguna base de datos que coincida con el filtro.';

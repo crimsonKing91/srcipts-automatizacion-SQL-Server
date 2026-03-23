@@ -1,0 +1,464 @@
+CORRE JOB
+############# CARGANPSAP
+LLAMA A 
+# EXEC SP_CORRE_BAT_SAP DE DB CITRICOS_PVU_FS
+= CODIGO
+USE [CITRICOS_PVU_FS]
+GO
+/****** Object:  StoredProcedure [dbo].[SP_CORRE_BAT_SAP]    Script Date: 04/03/2026 10:18:13 a. m. ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [dbo].[SP_CORRE_BAT_SAP]
+AS 
+BEGIN
+
+		DECLARE @BASE VARCHAR(250);
+		SET @BASE=(SELECT DB_NAME());
+
+        DECLARE @COMANDO VARCHAR(8000);
+        SET @COMANDO = '';
+        SET @COMANDO = 'E:\SAPCE01\SAC_SAP_EJECUTACARGA.BAT';   ---- EXEC
+        EXEC xp_cmdshell 
+             @COMANDO;
+
+
+END;
+----------------ARCHIVO .bat-------------------------
+E:\SAPCE01\SAC_SAP_EJECUTACARGA.BAT
+
+COMANDO
+# sqlcmd -S ATXSRVCE01 -i E:\SAPCE01\SAC_SAP_CARGA.sql
+
+--------------ARCHIVO .sql---------------------------------------
+SAC_SAP_CARGA.sql
+
+COMANDO
+# SET NOCOUNT ON EXEC CITRICOS_PVU_FS..CARGAARCHIVOSSAPVUCEM
+
+----------------- SP CARGAARCHIVOSSAPVUCEM -------------------------
+USE [CITRICOS_PVU_FS]
+GO
+/****** Object:  StoredProcedure [dbo].[CARGAARCHIVOSSAPVUCEM]    Script Date: 04/03/2026 10:19:59 a. m. ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER  PROCEDURE [dbo].[CARGAARCHIVOSSAPVUCEM]
+AS
+    BEGIN
+
+
+
+		DECLARE @PEDIMENTO VARCHAR(20)
+        DECLARE @NombreArchivo VARCHAR(150);
+        DECLARE @sql VARCHAR(MAX);
+        DECLARE @PathName VARCHAR(256);
+        DECLARE @CMD VARCHAR(512);
+        DECLARE @CommandShell TABLE(Line VARCHAR(512));
+        SET @PathName = 'E:\SAPCE01\PR\';
+        SET @CMD = 'DIR ' + @PathName + ' /B';
+        PRINT @CMD; -- test & debug
+		DECLARE @SCOMANDO VARCHAR(4000);
+		 DECLARE @FECHA VARCHAR(50);
+
+        INSERT INTO @CommandShell
+        EXEC MASTER..xp_cmdshell 
+             @CMD;
+        DECLARE CARGASQL CURSOR FAST_FORWARD
+        FOR SELECT LINE
+            FROM @CommandShell
+            WHERE ISNULL(LINE, '') <> ''
+			AND LINE LIKE  '%ZIMMEX_TR_SD%'
+			AND LINE NOT LIKE '%CON%'
+        OPEN CARGASQL;
+        FETCH NEXT FROM CARGASQL INTO @NombreArchivo;
+		DECLARE @FILE_ID uniqueidentifier 
+        WHILE @@FETCH_STATUS = 0
+            BEGIN
+			SET @FILE_ID = newid()
+			--select * from MAESTRO_ARCHIVOS_PVU_FS order by fecha_creacion desc
+                SET @SQL = 'INSERT INTO [dbo].[MAESTRO_ARCHIVOS_PVU_FS]([FILE_ID],[NOMBRE_ARCHIVO], ARCHIVO,[FECHA_CREACION],[CODIGO_TIPOARCHIVO],[ID_USUARIO]) ' + CHAR(13) + CHAR(10) + ' SELECT  CAST('+CHAR(39)+CAST(@FILE_ID AS VARCHAR(250))+CHAR(39)+' AS uniqueidentifier) ,' + CHAR(39) +@NombreArchivo + CHAR(39) + ',*,GETDATE(),''NP'',1 FROM OPENROWSET(BULK N' + CHAR(39) + 'E:\SAPCE01\PR\@NombreArchivo@' + CHAR(39) + ', SINGLE_BLOB) AS Document';
+                SET @sql = REPLACE(@SQL, '@NombreArchivo@', @NombreArchivo);
+                EXEC (@sql);
+                FETCH NEXT FROM CARGASQL INTO @NombreArchivo;
+				
+				EXEC [SD_LEER] @FILE_ID	
+
+
+				UPDATE MAESTRO_ARCHIVOS_PVU_FS
+                  SET 
+                      CODIGO_TIPOARCHIVO = CASE
+                                 WHEN @NombreArchivo LIKE '%SD%'
+                                 THEN 'NP'                           
+                             END
+							 , M_PROCESADO='NO'
+                WHERE NOMBRE_ARCHIVO = @NombreArchivo
+                      AND ISNULL(CODIGO_TIPOARCHIVO, '') = '';
+
+                SET @FECHA = CONVERT(VARCHAR(50), CONVERT(DATE, GETDATE()));
+
+				-- RUTA A DONDE SE MUEVE EL ARCHIVO
+                SET @SCOMANDO = 'COPY E:\SAPCE01\PR\' + @nombrearchivo + ' E:\PR_BACK\' + @FECHA + '-' + @nombrearchivo;
+
+
+				--ELIMINA EL ARCHIVO ORIGINAL
+                EXEC MASTER..xp_cmdshell 
+                     @SCOMANDO;
+                SET @SCOMANDO = 'DEL E:\SAPCE01\PR\' + @nombrearchivo;
+                EXEC MASTER..xp_cmdshell 
+                     @SCOMANDO;
+                FETCH NEXT FROM CARGASQL INTO @NombreArchivo;
+
+            END;
+        CLOSE CARGASQL;
+        DEALLOCATE CARGASQL;
+
+		
+		--EXEC xp_cmdshell 'copy E:\SAPCE01\PR\ZIMMEX_TR_SD0* E:\PR_BACK';
+		----EXEC xp_cmdshell 'del "E:\SAPCE01\PR\ZIMMEX_TR_SD0*"';
+		
+		--EXEC xp_cmdshell 'copy E:\SAPCE01\PR\ZIMMEX_TR_SD1* E:\PR_BACK';
+		--EXEC xp_cmdshell 'del "E:\SAPCE01\PR\ZIMMEX_TR_SD1*"';
+
+		EXEC INSERTADETALLEVENTASSAP;
+
+
+		EXEC DNP_DELETE_CONAGRA;
+
+
+    END
+
+
+-----------------------------FIN DE EJECUCION DE JOB ------------------------------------------------
+
+-----------------------------CORRE JOB CargaNP_XTRA -------------------------------------
+
+LLAMA A 
+######### EXEC INSERTADETALLESAP_XTRA;
+
+CODIGO
+
+USE [XTRA_PVU_FS]
+GO
+/****** Object:  StoredProcedure [dbo].[INSERTADETALLESAP_XTRA]    Script Date: 27/02/2026 02:04:58 p. m. ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [dbo].[INSERTADETALLESAP_XTRA]
+AS
+    BEGIN
+SP*1	EXEC Inserto_DNP
+
+        DECLARE @PEDIMENTO VARCHAR(20), @FACTURA VARCHAR(100), @FECHA DATE, @EXISTE INT, @UID VARCHAR(100), @CLAVE_PED VARCHAR(5);
+        DECLARE INSERTANP CURSOR FAST_FORWARD
+        FOR 
+		
+		SELECT PEDIMENTO, FACTURA, FECHA, CVEPEDIMENTO
+		FROM [T_Inserto_DNP]
+
+        OPEN INSERTANP;
+        FETCH NEXT FROM INSERTANP INTO @PEDIMENTO, @FACTURA, @FECHA, @CLAVE_PED;
+        WHILE @@FETCH_STATUS = 0
+            BEGIN
+                SELECT @EXISTE =
+                (
+                    SELECT COUNT(FACTURA)
+                    FROM [dbo].[FACTURASVTA]
+                    WHERE FACTURA = @FACTURA
+					AND CLAVE_PED = @CLAVE_PED
+					
+                );
+                IF @EXISTE > 0
+                    BEGIN
+SP *2                        EXEC SP_CARGAFACTURA 
+                             @FACTURA, 
+                             @PEDIMENTO,
+							 @CLAVE_PED;
+					END;
+
+					BEGIN 
+						 SELECT @EXISTE =
+									(
+										SELECT COUNT(FACTURA)
+										FROM [dbo].[FACTURASVTA]
+										WHERE UID_FAC = @FACTURA
+										AND CLAVE_PED = @CLAVE_PED
+					
+									)
+						 IF @EXISTE > 0
+							BEGIN
+SP *3								EXEC SP_CARGAFACTURA_UID
+									 @FACTURA, 
+									 @PEDIMENTO,
+									 @CLAVE_PED;
+							END
+							
+					END
+                FETCH NEXT FROM INSERTANP INTO @PEDIMENTO, @FACTURA, @FECHA, @CLAVE_PED;
+            END;
+        CLOSE INSERTANP;
+        DEALLOCATE INSERTANP;
+    END;
+
+	-- SP_CORRE_BAT_SAP
+
+
+####
+LLAMADA DE SP*1	EXEC Inserto_DNP
+
+USE [XTRA_PVU_FS]
+GO
+/****** Object:  StoredProcedure [dbo].[Inserto_DNP]    Script Date: 04/03/2026 10:44:42 a. m. ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+ALTER PROCEDURE [dbo].[Inserto_DNP]
+AS
+    BEGIN
+        SET NOCOUNT ON;
+        TRUNCATE TABLE [T_Inserto_DNP];
+        DECLARE @RESULTADO TABLE
+        (PEDIMENTO    VARCHAR(50), 
+         FECHA        DATETIME, 
+         CVEPEDIMENTO VARCHAR(50), 
+         FACTURA      VARCHAR(150), 
+         COVE         VARCHAR(50)
+        );
+        INSERT INTO @RESULTADO
+               SELECT V.PEDIMENTOARMADO, 
+                      V.FECHA, 
+                      V.[CLAVE PEDIMENTO], 
+                      CASE WHEN FACTURAS_NUMERO LIKE 'COVE%' THEN FCSAT_FACTURA
+					  ELSE FACTURAS_NUMERO END , 
+                      FACTURAS_NUMERO
+               FROM    XTRA_PVU_FS.dbo.V_ENCABEZADO V INNER JOIN
+                       XTRA_PVU_FS.dbo.FACTURAS F ON V.PEDIMENTOARMADO = F.PEDIMENTOARMADO LEFT OUTER JOIN
+                       XTRA_PVU_FS.dbo.FACTURACOVESAT FC  ON F.FACTURAS_NUMERO = FC.FCSAT_COVENUMERO
+					where V.[TIPO DE OPERACION]=2
+					and V.[CLAVE PEDIMENTO] in ('a1','rt')
+					and V.fecha >='20230101'
+					and NOT EXISTS (select 1 from XTRA_PVU_FS..DETALLENP d
+													where d.PEDIMENTOARMADO=v.PEDIMENTOARMADO
+													and d.FACTURA=FCSAT_FACTURA)
+        DECLARE @INSERTANP TABLE
+        (PEDIMENTO    VARCHAR(50), 
+         FACTURA      VARCHAR(150), 
+         FECHA        DATETIME, 
+         CVEPEDIMENTO VARCHAR(50), 
+         NOTA         VARCHAR(50)
+        );
+        INSERT INTO @INSERTANP
+               SELECT X.PEDIMENTO, 
+                      X.FACTURA, 
+                      X.FECHA, 
+                      X.CVEPEDIMENTO, 
+                      'Factura' Nota
+               FROM @RESULTADO X
+               WHERE LEN(X.FACTURA) < 36
+               UNION ALL
+               SELECT X.PEDIMENTO, 
+                      F.FACTURA, 
+                      X.FECHA, 
+                      X.CVEPEDIMENTO, 
+                      'UID' Nota
+               FROM [FACTURASVTA] F
+                    INNER JOIN @RESULTADO X ON F.UID_FAC = X.FACTURA
+               WHERE LEN(X.FACTURA) >= 36;
+
+			
+
+        INSERT INTO [dbo].[T_Inserto_DNP]
+        ([PEDIMENTO], 
+         [FACTURA], 
+         [FECHA], 
+         [CVEPEDIMENTO]
+        )
+               SELECT z.PEDIMENTO, 
+                      z.FACTURA, 
+                      z.FECHA, 
+                      z.CVEPEDIMENTO
+               FROM @INSERTANP Z
+               WHERE Z.FACTURA NOT IN
+               (
+                   SELECT D.FACTURA
+                   FROM DETALLENP D
+                   WHERE D.PEDIMENTOARMADO = Z.PEDIMENTO
+                         AND D.FACTURA = Z.FACTURA
+               )
+                     AND z.FECHA >= '20211001'
+               ORDER BY z.fecha;
+    END;
+
+#####
+LLAMADA SP SP *2 EXEC SP_CARGAFACTURA 
+CODIGO
+
+USE [XTRA_PVU_FS]
+GO
+/****** Object:  StoredProcedure [dbo].[SP_CARGAFACTURA]    Script Date: 04/03/2026 10:52:44 a. m. ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER procedure [dbo].[SP_CARGAFACTURA]
+(@FACTURA        VARCHAR(100), 
+ @PEDIMENTO      VARCHAR(20),
+ @CLAVE_PED VARCHAR (10)
+)
+AS
+    BEGIN
+        INSERT INTO [dbo].[DETALLENP]
+        ([ADUANA], 
+         [PATENTE], 
+         [PEDIMENTO], 
+         [FACTURA], 
+         [FECHA_FACTURA], 
+         [CODIGO_PRODUCTO], 
+         [DESCRIPCION_COMERCIAL], 
+         [PRECIO_TOTAL], 
+         [MONEDA], 
+         [CANTIDAD], 
+         [UNIDAD_MEDIDA], 
+         [PEDIMENTOARMADO], 
+         SECUENCIA_PEDIMENTO, 
+         CLIENTE_PROVEEDOR, 
+         COVE,
+		 CLIENTEPROVEEDOR
+        )
+               SELECT SUBSTRING(@PEDIMENTO, 1, 3), 
+                      SUBSTRING(@PEDIMENTO, 5, 4), 
+                      SUBSTRING(@PEDIMENTO, 10, 7), 
+                      [FACTURA], 
+                      [FECHA], 
+                      [MATERIAL], 
+                      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE([DESCRIPCION], '+Á', 'á'), '+ê','É'), '+î', 'Í'), '+ô', 'Ó'), '+û','Ú'), '├æ', 'Ñ'), 
+                      [PRECIOTOTAL], 
+                      [MONEDA], 
+                      CASE UNIDAD WHEN 'LB' THEN [CANTIDAD_UMT] ELSE CANTIDAD END, 
+                      CASE [UNIDAD] WHEN 'LB' THEN '1'ELSE UNIDAD END, 
+                      @PEDIMENTO, 
+                      0, 
+                      [CLIENTE\PROVEEDOR], 
+					  '', --Solicitud Dulce 15062021
+               --(
+               --    SELECT FCSAT_COVENUMERO
+               --    FROM FACTURACOVESAT
+               --    WHERE FCSAT_FACTURA = FACTURASVTA.FACTURA
+               --)
+					'Carga_SAP'
+
+               FROM [dbo].[FACTURASVTA]
+               WHERE LTRIM(RTRIM([FACTURASVTA].FACTURA )) NOT IN (SELECT LTRIM(RTRIM(X.FACTURA)) FROM [XTRA_PVU_FS]..DETALLENP X 
+																	WHERE LTRIM(RTRIM(X.FACTURA))=LTRIM(RTRIM([FACTURASVTA].FACTURA ))
+																	AND [FACTURASVTA].[MATERIAL]=X.CODIGO_PRODUCTO
+																	AND X.PEDIMENTOARMADO=@PEDIMENTO) --Se agrega 26abril2022
+				AND [FACTURASVTA].FACTURA=@FACTURA	
+				AND FACTURA = @FACTURA
+				AND CLAVE_PED=@CLAVE_PED
+			   --AND NOT EXISTS (SELECT FACTURA FROM [FACTURASVTA])
+			   
+        TRUNCATE TABLE VENTASSAP; 
+        --TRUNCATE TABLE FACTURASVTA
+    END;
+
+---
+
+
+###################
+LLAMADA SP *3 [SP_CARGAFACTURA_UID]
+
+CODIGO
+
+USE [XTRA_PVU_FS]
+GO
+/****** Object:  StoredProcedure [dbo].[SP_CARGAFACTURA_UID]    Script Date: 04/03/2026 10:53:55 a. m. ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER procedure [dbo].[SP_CARGAFACTURA_UID]
+(@FACTURA        VARCHAR(100), 
+ @PEDIMENTO      VARCHAR(20),
+ @CLAVE_PED VARCHAR(10)
+)
+AS
+    BEGIN
+        INSERT INTO [dbo].[DETALLENP]
+        ([ADUANA], 
+         [PATENTE], 
+         [PEDIMENTO], 
+         [FACTURA], 
+         [FECHA_FACTURA], 
+         [CODIGO_PRODUCTO], 
+         [DESCRIPCION_COMERCIAL], 
+         [PRECIO_TOTAL], 
+         [MONEDA], 
+         [CANTIDAD], 
+         [UNIDAD_MEDIDA], 
+         [PEDIMENTOARMADO], 
+         SECUENCIA_PEDIMENTO, 
+         CLIENTE_PROVEEDOR, 
+         COVE,
+		 CLIENTEPROVEEDOR
+        )
+               SELECT SUBSTRING(@PEDIMENTO, 1, 3), 
+                      SUBSTRING(@PEDIMENTO, 5, 4), 
+                      SUBSTRING(@PEDIMENTO, 10, 7), 
+                      [FACTURA], 
+                      [FECHA], 
+                      [MATERIAL], 
+                      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE([DESCRIPCION], '+Á', 'á'), '+ê','É'), '+î', 'Í'), '+ô', 'Ó'), '+û','Ú'), '├æ', 'Ñ'), 
+                      [PRECIOTOTAL], 
+                      [MONEDA], 
+                     CASE UNIDAD WHEN 'LB' THEN [CANTIDAD_UMT] ELSE CANTIDAD END,
+					 
+                      CASE [UNIDAD] WHEN 'LB' THEN '1'ELSE UNIDAD END, 
+                      @PEDIMENTO, 
+                      0, 
+                      [CLIENTE\PROVEEDOR], 
+					  '', --Solicitud Dulce 15062021
+               --(
+               --    SELECT FCSAT_COVENUMERO
+               --    FROM FACTURACOVESAT
+               --    WHERE FCSAT_FACTURA = FACTURASVTA.FACTURA
+               --)
+					'Carga_SAP'
+               FROM [dbo].[FACTURASVTA]
+			  WHERE LTRIM(RTRIM([FACTURASVTA].UID_FAC )) NOT IN (SELECT LTRIM(RTRIM([FACTURASVTA].UID_FAC)) FROM [XTRA_PVU_FS]..DETALLENP X 
+																	WHERE LTRIM(RTRIM([FACTURASVTA].UID_FAC))=LTRIM(RTRIM([FACTURASVTA].FACTURA ))
+																	AND [FACTURASVTA].[MATERIAL]=X.CODIGO_PRODUCTO
+																	AND X.PEDIMENTOARMADO=@PEDIMENTO) --Se agrega 26abril2022
+				AND UID_FAC = @FACTURA
+				AND CLAVE_PED=@CLAVE_PED
+
+	
+        TRUNCATE TABLE VENTASSAP; 
+        --TRUNCATE TABLE FACTURASVTA
+    END;
+
+----------------------------FIN DE EJECUCION DE JOB --------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

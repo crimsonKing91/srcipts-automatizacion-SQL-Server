@@ -1,0 +1,24 @@
++3E^}YT_dJe#|Ttn)'vGWQVz4A(P~?t[
+
+CUANDO SE BLOQUE TOTALMETE SQL SERVER 
+COLOCAR PARAMTERO -m con instancia stopped
+correr los comandos y luego reiniciar instancia:
+
+-- 1. Activamos sa y le ponemos clave SENCILLA (para que no falle al teclear)
+ALTER LOGIN sa ENABLE;
+GO
+ALTER LOGIN sa WITH PASSWORD = 'Sql12345';
+GO
+
+-- 2. Agregamos tu usuario de Windows como DUEÑO TOTAL del servidor
+CREATE LOGIN [MTX\saadmin] FROM WINDOWS;
+GO
+ALTER SERVER ROLE sysadmin ADD MEMBER [MTX\saadmin];
+GO
+
+-- 3. Forzamos el "Modo Mixto" directamente en el registro
+EXEC xp_instance_regwrite N'HKEY_LOCAL_MACHINE', N'Software\Microsoft\MSSQLServer\MSSQLServer', N'LoginMode', REG_DWORD, 2;
+GO
+
+-- 4. Salimos
+exit
